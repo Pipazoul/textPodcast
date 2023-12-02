@@ -1,4 +1,4 @@
-FROM node:lts-alpine as dev
+FROM node:lts as dev
 
 WORKDIR /app/
 COPY . .
@@ -6,7 +6,7 @@ RUN npm install
 
 ENTRYPOINT [ "npm", "run", "dev" ]
 
-FROM node:lts-alpine as prod
+FROM node:lts as prod
 
 WORKDIR /app/
 COPY . .
