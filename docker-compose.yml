@@ -1,0 +1,31 @@
+version: '3.7'
+services:
+  back:
+    profiles:
+      - "dev"
+    container_name: back
+    build: 
+      context: back/
+      target: "dev"
+    volumes:
+      - ./back/src:/app/src
+    env_file:
+      - .env
+    depends_on:
+      - redis
+  redis:
+    container_name: redis
+    image: redis
+    restart: always
+    ports:
+      - 6379:6379
+
+  back-prod:
+    profiles:
+      - "prod"
+    container_name: back-prod
+    build: 
+      context: back/
+      target: "prod"
+    env_file:
+      - .env
