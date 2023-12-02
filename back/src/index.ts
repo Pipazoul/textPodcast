@@ -8,24 +8,22 @@ const redisConfiguration = {
    }
  }
 
- const worker = new Worker('postImage', async job => {
-   //return createAudio();
+ const worker = new Worker('createAudio', async job => {
+   return createAudio();
  }
 , redisConfiguration);
 
+console.log("worker started");
+const queue = new Queue('createAudio', redisConfiguration);
 
-createAudio();
-const queue = new Queue('postImage', redisConfiguration);
-
-//const repeat = { pattern: '*/15 * * * *' };
-queue.add("currentJob", { delay: 10000 })
+// delay 2 minutes
+queue.add("currentJob", {}, { delay: 120000 });
 
 
 // log completed jobs and starting ones
 worker.on('completed', (job) => {
   console.log(`Job ${job.id} completed`);
-  //queue.add("currentJob", { delay: 10000 })
-
+  queue.add("currentJob", {}, { delay: 120000 });
  });
 
  worker.on('failed', (job, err) => {

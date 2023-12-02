@@ -29,3 +29,19 @@ services:
       target: "prod"
     env_file:
       - .env
+  styletts2:
+    container_name: styletts2
+    image: r8.im/adirik/styletts2@sha256:dd4d03b097968361dda9b0563716eb0758d1d5b8aeb890d22bd08634e2bd069c
+    restart: always
+    profiles:
+      - "prod"
+    ports:
+      - 5007:5000
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+

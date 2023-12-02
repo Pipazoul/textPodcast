@@ -15,6 +15,11 @@ const s3_secret_key: string = process.env.S3_SECRET_KEY!
 const s3_endpoint: string = process.env.S3_ENDPOINT!
 const s3_bucket: string = process.env.S3_BUCKET!
 
+//Voices
+const voice_en_1 : string = process.env.VOICE_EN_1!
+const voice_en_2 : string = process.env.VOICE_EN_2!
+const voice_en_3 : string = process.env.VOICE_EN_3!
+
 const minioClient = new Minio.Client({
     endPoint: s3_endpoint,
     port: 443,
@@ -24,11 +29,18 @@ const minioClient = new Minio.Client({
     pathStyle: true
 })
 
-
-
-
-
-
+function voiceSelector(language: string): string{
+    switch(language){
+        case "en":
+            // return random voice
+            let voices = [voice_en_1, voice_en_2, voice_en_3]
+            return voices[Math.floor(Math.random() * voices.length)]
+        case "fr":
+            return voice_en_2
+        default:
+            return voice_en_1
+    }
+}
 
 function removeTags(str: string) {
 	if ((str===null) || (str===''))
@@ -76,6 +88,40 @@ async function gets3Items() {
     return objects;
 }
 
+async function createRss(s3Items, articles){
+    console.log("creating rss feed")
+    let rss = ""
+    rss += "<rss version=\"2.0\">\n"
+    rss += "<channel>\n"
+    rss += "<title>Wallabag to Podcast</title>\n"
+    rss += "<link>YOUR_LINK_GOES_HERE</link>\n"  // Replace YOUR_LINK_GOES_HERE with the actual link
+    rss += "<description>Wallabag to Podcast</description>\n"
+    rss += "<language>en-us</language>\n"
+    rss += "<lastBuildDate>" + new Date().toUTCString() + "</lastBuildDate>\n"
+    // put 01-12-2023
+    rss += "<pubDate>" + new Date("01-12-2023").toUTCString() + "</pubDate>\n"
+    //add cover image
+    rss += "<image>\n"
+    rss += "<url>https://99designs-blog.imgix.net/blog/wp-content/uploads/2018/01/attachment_91327424-e1515420211463.png</url>\n" // Replace YOUR_IMAGE_URL_GOES_HERE with the actual image url
+    rss += "<title>Wallabag to Podcast</title>\n"
+    rss += "<link></link>\n" // Replace YOUR_LINK_GOES_HERE with the actual link
+    rss += "</image>\n"
+    for(let article of articles){
+        console.log(`article id: ${article.id} - s3Items: ${s3Items} - includes: ${s3Items.includes(article.id.toString())}` )
+        if(s3Items.includes(article.id.toString())){
+            rss += "<item>\n"
+            rss += "<title>" + article.title + "</title>\n"
+            rss += `<enclosure url="https://${s3_endpoint}/${s3_bucket}/${article.id}.mp3" length="1" type="audio/mpeg" />\n`
+            rss += "<pubDate>" + new Date(article.date).toUTCString() + "</pubDate>\n"
+            rss += "<guid>" + article.id + "</guid>\n"
+            rss += "</item>\n"
+        }
+    }
+    rss += "</channel>\n"
+    rss += "</rss>\n"
+    return rss
+}
+
 
 export async function createAudio(){
     console.log("creating audio");
@@ -114,7 +160,8 @@ export async function createAudio(){
         title: string,
         url: string,
         content: string,
-        language?: string
+        language?: string,
+        date?: string
     }
     let articles: Article[] = []
 
@@ -124,7 +171,8 @@ export async function createAudio(){
             title: entry.title,
             url: entry.url,
             content: entry.content,
-            language: ""
+            language: "",
+            date: entry.created_at
         }
         articles.push(article)
     }
@@ -132,9 +180,9 @@ export async function createAudio(){
 
     const s3Items = await gets3Items();
     // s3 items chnage into array of ids
-    const s3ItemsIds = s3Items.map(item => item.name.split('.')[0]);
+    let s3ItemsIds = s3Items.map(item => item.name.split('.')[0]);
 
-
+    let rawArticles = articles
     // remove articles that already have audio
     articles = articles.filter(article => !s3ItemsIds.includes(article.id.toString()));
 
@@ -143,15 +191,12 @@ export async function createAudio(){
         article.content = removeTags(article.content);
     });
 
-
-    
     for(let article of articles){
         let language = await cld.detect(article.content)
         article.language = language.languages[0].code
     }
 
     for(let article of articles){
-        console.log(article.language)
         if(article.language == "en"){
             console.log("creating audio for article " + article.id)
 
@@ -169,7 +214,8 @@ export async function createAudio(){
                     },
                     body: JSON.stringify({
                         input: {
-                            text: chunk
+                            text: chunk,
+                            reference: voiceSelector(article.language)
                         }
                     })
                 })
@@ -189,16 +235,36 @@ export async function createAudio(){
             }
             else{
                 console.log("only one audio chunk")
-                //console.log(audios)
                 audio = audios[0]
             }
             
-            
             try{
-                // upload to s3
+                // upload to s3 as public file
                 let filename = article.id + ".mp3"
                 let file = Buffer.from(audio , 'base64')
-                await minioClient.putObject(s3_bucket, filename, file, 'audio/mp3')
+                await minioClient.putObject(s3_bucket, filename, file, file.length, {
+                    'Content-Type': 'audio/mpeg',
+                    'x-amz-acl': 'public-read'
+                })
+                console.log("uploaded file " + filename)
+            }
+            catch(err){
+                console.log(err)
+            }
+            const s3Items = await gets3Items();
+            // s3 items chnage into array of ids
+            let s3ItemsIds = s3Items.map(item => item.name.split('.')[0]);
+            let rss = await createRss(s3ItemsIds, rawArticles)
+            try{
+                // upload to s3 as public file
+                let filename = "rss.xml"
+                let file = Buffer.from(rss , 'utf8')
+                await minioClient.putObject(s3_bucket, filename, file, file.length, {
+                    'Content-Type': 'application/xml',
+                    'x-amz-acl': 'public-read'
+                })
+                console.log("uploaded file " + filename)
+
             }
             catch(err){
                 console.log(err)
